@@ -1,0 +1,34 @@
+SELECT
+Source,edgename,event,category,Day,severity,message,
+24 as HoursPerDay,
+sum(DurationHours) AS Total_Downtime_Hours,
+24-sum(durationhours) AS Total_Uptime_Hours
+
+from
+
+(select 'Paratus' as Source, edgename, event,category,Day,severity,message,DurationHours
+
+FROM fqm_lakehouse.ig_it.paratus_enterprise_daily_events
+WHERE category="EDGE"
+AND event="EDGE_DOWN"
+GROUP BY 
+edgename, event,category,Day,severity,message,DurationHours
+
+
+Union all
+SELECT 'DT' as Source,edgename,event,category,Day,severity,message,DurationHours
+
+FROM fqm_lakehouse.ig_it.dt_enterprise_daily_events
+WHERE category="EDGE"
+AND event="EDGE_DOWN"
+GROUP BY 
+edgename, event,category,Day,severity,message,
+DurationHours
+)
+
+Unioned
+
+
+
+GROUP BY
+Source,edgename,event,category,Day,severity,message

@@ -1,0 +1,63 @@
+select
+edgename, sum(EDGE_UP)/count(distinct day) EDGE_UP,sum(EDGE_DOWN)/count(distinct day) EDGE_DOWN,
+(sum(EDGE_UP)/count(distinct day))/24 AS EDGE_UP_PERCENTAGE,
+(sum(EDGE_DOWN)/count(distinct day))/24 AS EDGE_DOWN_PERCENTAGE,
+sum(edge_up)/count(distinct day)+sum(edge_down)/count(distinct day) as Total
+
+
+From
+
+(
+select 
+edgename,
+day,
+CASE WHEN event IN ('EDGE_UP','EDGE_PHYSICAL_LINK_UP','EDGE_BGP_NEIGHBOR_UP') THEN (DurationHours) ELSE NULL END as EDGE_UP,
+CASE WHEN  event IN ('EDGE_DOWN','EDGE_PHYSICAL_LINK_DOWN','EDGE_BGP_NEIGHBOR_DOWN')THEN (DurationHours) ELSE NULL END as EDGE_DOWN
+
+from 
+fqm_lakehouse.ig_it.paratus_enterprise_daily_events
+Where cast(eventDateTime as date)>= date_sub(current_date(), 30) 
+--and edgename='kml-dr-vcpe-sec-hub'
+AND event IN ('EDGE_UP','EDGE_DOWN','EDGE_PHYSICAL_LINK_UP','EDGE_PHYSICAL_LINK_DOWN','EDGE_BGP_NEIGHBOR_DOWN','EDGE_BGP_NEIGHBOR_UP')
+GROUP BY 
+edgename,event,day,DurationHours
+order by day,edgename
+)
+ 30day_event
+
+ group by edgename
+
+ UNION ALL 
+
+select
+edgename, sum(EDGE_UP)/count(distinct day) EDGE_UP,sum(EDGE_DOWN)/count(distinct day) EDGE_DOWN,
+(sum(EDGE_UP)/count(distinct day))/24 AS EDGE_UP_PERCENTAGE,
+(sum(EDGE_DOWN)/count(distinct day))/24 AS EDGE_DOWN_PERCENTAGE,
+sum(edge_up)/count(distinct day)+sum(edge_down)/count(distinct day) as Total
+
+
+From
+
+(
+select 
+edgename,
+day,
+CASE WHEN event IN ('EDGE_UP','EDGE_PHYSICAL_LINK_UP','EDGE_BGP_NEIGHBOR_UP') THEN (DurationHours) ELSE NULL END as EDGE_UP,
+CASE WHEN event IN ('EDGE_DOWN','EDGE_PHYSICAL_LINK_DOWN','EDGE_BGP_NEIGHBOR_DOWN') THEN (DurationHours) ELSE NULL END as EDGE_DOWN
+
+from 
+fqm_lakehouse.ig_it.dt_enterprise_daily_events
+Where cast(eventDateTime as date)>= date_sub(current_date(), 30) 
+--and edgename='kml-dr-vcpe-sec-hub'
+AND event IN ('EDGE_UP','EDGE_DOWN','EDGE_PHYSICAL_LINK_UP','EDGE_PHYSICAL_LINK_DOWN','EDGE_BGP_NEIGHBOR_DOWN','EDGE_BGP_NEIGHBOR_UP')
+GROUP BY 
+edgename,event,day,DurationHours
+order by day,edgename
+)
+ 30day_event
+
+ group by edgename
+
+
+
+

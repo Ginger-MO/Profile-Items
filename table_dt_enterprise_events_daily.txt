@@ -1,0 +1,102 @@
+-- Daily durations using NEXT event WITHIN EACH CATEGORY (24h buckets)
+USE CATALOG fqm_lakehouse;
+USE SCHEMA ig_it;
+
+--drop table if exists fqm_lakehouse.ig_it.dt_enterprise_daily_events;
+--CREATE TABLE dt_enterprise_daily_events AS
+
+
+WITH 
+events AS (
+  SELECT
+   edgename, logicalId,   
+   category
+   , event,
+      CAST(eventTime AS TIMESTAMP) AS eventDateTime,
+    /* Map to CustomCategory */
+        severity, message
+    --, detail --,enterpriseUsername --,segmentName --, enterpriseName --,ingestion_date,created 
+       
+  FROM fqm_lakehouse.is_it.fqm_velocloud_dt_api_enterpriseevents
+  --where category='EDGE'
+
+  GROUP BY  edgeName,  logicalId, CAST(eventTime AS TIMESTAMP), event,severity, message
+  ,  category
+  order by CAST(eventTime AS TIMESTAMP)
+),
+
+-- next event/time within SAME edge & category (add segmentName here if each circuit is separate)
+events_with_next_by_cat AS 
+(
+  SELECT
+    e.edgename,e.logicalid  ,e.category 
+    ,e.event, LEAD(e.event)  OVER (PARTITION BY e.edgename, e.category ORDER BY e.eventDateTime asc) AS NextEventInCategory,
+    e.eventdateTime
+    ,LEAD(e.eventDateTime)OVER (PARTITION BY e.edgename, e.category ORDER BY e.eventDateTime asc) AS NextEventTimeInCategory
+  ,e.severity ,e.message     
+     FROM events e
+) ,
+bounds AS (
+  SELECT
+   ec.edgename,/*e.logicalid,*/ec.category
+   , ec.event, NextEventInCategory
+   ,ec.eventdateTime 
+   --, NextEventTimeInCategory
+  /* If there is no next event, substitute the current system time,if NextEventTimeInCategory is earlier than eventDateTime rather use greatest of the two*/
+   ,GREATEST(ec.eventDateTime, COALESCE(ec.NextEventTimeInCategory, current_timestamp())) AS NextTimeSafe
+   ,ec.severity ,ec.message   
+  FROM events_with_next_by_cat ec
+ -- WHERE ec.eventDateTime IS NOT NULL
+),
+-- one row per DAY spanned by each event
+days AS (
+  SELECT
+     b.edgename,/*e.logicalid,*/b.category,b.event, NextEventInCategory
+
+     /*EXPANDS/explode each event into one row per day between its start and end time. 
+      SEQUENCE:creates an array of dates, stepping by 1 day from the start date (eventDateTime) to the end date (NextTimeSafe).
+      DATE_TRUNC: Rounds the event’s start timestamp down to midnight (start of that day).*/
+     ,EXPLODE( CASE  WHEN NextTimeSafe >= eventDateTime THEN  SEQUENCE(DATE_TRUNC('day', eventDateTime), DATE_TRUNC('day', NextTimeSafe), INTERVAL 1 DAY)
+        ELSE ARRAY(DATE_TRUNC('day', eventDateTime)) END ) AS DayStart
+    ,b.eventdateTime 
+    ,b.NextTimeSafe
+   ,b.severity ,b.message  
+   FROM bounds b
+),
+daily AS (
+  SELECT
+    edgename,category,event, 
+    eventDateTime,NextEventInCategory, 
+    daystart, NextTimeSafe,
+    severity, category, severity,message
+    ,   /*how many seconds of the event fall within one calendar day,
+    This picks whichever time is later:The event’s start time, or The start of the day.
+    This picks whichever time is earlier:The event’s end (NextTimeSafe), or The end of the day (DayStart + 1 day)
+    GREATEST(0, ...)→ Prevents negative durations in case of any boundary errors.If something went wrong and start > end, it just outputs 0 seconds instead of a negative number.*/
+    GREATEST( 0, TIMESTAMPDIFF(SECOND, GREATEST(eventDateTime, DayStart), LEAST(NextTimeSafe, DayStart + INTERVAL 1 DAY)) ) AS DurationSeconds
+    FROM days
+)
+-- A) Per-event × day grain (handy for troubleshooting in Power BI)
+SELECT
+  d.edgename  
+  ,d.event
+  , d.category
+  ,d.eventDateTime
+  ,d.NextEventInCategory
+  ,d.NextTimeSafe AS NextEventTime
+  , try_cast(d.DayStart AS DATE)  AS Day
+  ,d.severity
+  , d.message
+  ,SUM(d.DurationSeconds)          AS DurationSeconds,
+  SUM(d.DurationSeconds)/60.0     AS DurationMinutes,
+  SUM(d.DurationSeconds)/3600.0   AS DurationHours
+FROM daily d
+
+GROUP BY
+--  edg.edgeId, edg.isHub, edg.name,
+   d.edgename,
+  d.eventDateTime, d.NextEventInCategory, d.NextTimeSafe,
+  d.DayStart, d.category, d.event, d.severity,d.message
+
+
+
